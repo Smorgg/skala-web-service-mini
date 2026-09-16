@@ -1,0 +1,91 @@
+Project trend_report_service {
+  database_type: 'PostgreSQL'
+  Note: 'Public users may read only reports whose status is PUBLISHED.'
+}
+Enum member_role {
+  USER
+  ADMIN
+}
+Enum candidate_status {
+  PENDING
+  ADOPTED
+}
+Enum report_status {
+  DRAFT
+  PUBLISHED
+  DELETED
+}
+Enum interest_level {
+  LOW
+  MEDIUM
+  HIGH
+}
+Table users {
+  id bigint [pk, increment]
+  email varchar(255) [not null, unique]
+  password_hash varchar(255) [not null]
+  role member_role [not null, default: 'USER']
+  created_at timestamp [not null]
+  updated_at timestamp [not null]
+}
+Table categories {
+  id bigint [pk, increment]
+  name varchar(50) [not null, unique]
+  display_order int [not null]
+}
+Table trend_candidates {
+  id bigint [pk, increment]
+  category_id bigint [not null]
+  title varchar(255) [not null]
+  ai_summary text
+  source_links text[] [not null, note: 'Source URLs used during review.']
+  interest_level interest_level [not null]
+  status candidate_status [not null, default: 'PENDING']
+  diffusion_started_on date
+  repeat_mention_count int
+  recent_content_growth_rate decimal(5,2)
+  engagement_summary text
+  platform_spread_summary text
+  reviewed_by bigint
+  reviewed_at timestamp
+  created_at timestamp [not null]
+  updated_at timestamp [not null]
+  Note: 'Adopt a candidate and create its report in one transaction.'
+}
+Table reports {
+  id bigint [pk, increment]
+  candidate_id bigint [not null, unique, note: 'Must reference an ADOPTED candidate.']
+  category_id bigint [not null]
+  author_id bigint [not null]
+  title varchar(255) [not null]
+  summary varchar(500) [not null]
+  image_url varchar(2048)
+  description text [not null, note: 'Includes final source links.']
+  platforms varchar(50)[] [not null, note: 'Use a PostgreSQL GIN index for platform filtering.']
+  keywords varchar(100)[] [not null, note: 'Use a PostgreSQL GIN index for keyword filtering.']
+  diffusion_started_on date
+  diffusion_ended_on date
+  interest_level interest_level [not null]
+  engagement_evidence text
+  platform_spread_evidence text
+  status report_status [not null, default: 'DRAFT']
+  published_at timestamp
+  created_at timestamp [not null]
+  updated_at timestamp [not null]
+  Note: 'Category, interest level, and diffusion dates are publication snapshots. Set published_at when status becomes PUBLISHED; public reads must filter status = PUBLISHED.'
+}
+Table saved_reports {
+  user_id bigint [not null]
+  report_id bigint [not null]
+  saved_at timestamp [not null]
+  indexes {
+    (user_id, report_id) [pk]
+  }
+}
+Ref: trend_candidates.category_id > categories.id
+Ref: trend_candidates.reviewed_by >? users.id
+Ref: reports.candidate_id > trend_candidates.id
+Ref: reports.category_id > categories.id
+Ref: reports.author_id > users.id
+Ref: saved_reports.user_id > users.id
+Ref: saved_reports.report_id > reports.id
