@@ -1,0 +1,723 @@
+openapi: 3.1.0
+info:
+  title: 전하처럼 API
+  version: 1.0.0
+  description: |
+    전하처럼의 회원가입·로그인, 공개 조회, 사용자별 저장, 관리자 후보 검토와 리포트 발행을 위한 REST 계약입니다.
+servers:
+  - url: /api/v1
+tags:
+  - name: Auth
+    description: 일반 사용자 회원가입과 사용자·관리자 로그인을 처리합니다.
+  - name: Public Reports
+    description: 발행된 리포트를 조회합니다.
+  - name: Saved Reports
+    description: 로그인 성공 응답의 id(userId)로 구분하는 사용자별 저장 기능입니다.
+  - name: Admin Candidates
+    description: AI 수집 파이프라인이 등록한 후보를 검토합니다.
+  - name: Admin Reports
+    description: 채택 후보에서 생성된 리포트를 관리하고 발행합니다.
+paths:
+  /auth/signup:
+    post:
+      tags: [Auth]
+      summary: 일반 사용자 회원가입
+      description: 회원가입으로는 USER 역할만 생성합니다.
+      operationId: signup
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SignupRequest'
+      responses:
+        '201':
+          description: 회원가입 완료
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/AuthenticatedUser'
+                  - type: object
+                    properties:
+                      role:
+                        const: USER
+        '409':
+          $ref: '#/components/responses/LoginIdConflict'
+  /auth/login:
+    post:
+      tags: [Auth]
+      summary: 사용자 또는 관리자 로그인
+      description: 로그인한 계정의 id와 역할을 반환합니다.
+      operationId: login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: 로그인 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthenticatedUser'
+        '401':
+          $ref: '#/components/responses/InvalidCredentials'
+  /categories:
+    get:
+      tags: [Public Reports]
+      summary: 리포트 카테고리 목록 조회
+      operationId: listCategories
+      responses:
+        '200':
+          description: 표시 순서로 정렬된 카테고리 목록
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Category'
+  /reports:
+    get:
+      tags: [Public Reports]
+      summary: 발행 리포트 목록 조회
+      description: PUBLISHED 상태의 리포트만 반환합니다. 결과가 없으면 빈 배열인 200 응답을 반환합니다.
+      operationId: listPublishedReports
+      parameters:
+        - $ref: '#/components/parameters/CategoryIdFilter'
+      responses:
+        '200':
+          description: 발행 리포트 카드 목록
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ReportCard'
+  /reports/{reportId}:
+    get:
+      tags: [Public Reports]
+      summary: 발행 리포트 상세 조회
+      description: PUBLISHED가 아니거나 존재하지 않는 리포트는 공개 API에서 404를 반환합니다.
+      operationId: getPublishedReport
+      parameters:
+        - $ref: '#/components/parameters/ReportId'
+      responses:
+        '200':
+          description: 발행 리포트 상세
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReportDetail'
+        '404':
+          $ref: '#/components/responses/ReportNotFound'
+  /users/{userId}/saved-reports:
+    get:
+      tags: [Saved Reports]
+      summary: 사용자가 저장한 리포트 목록 조회
+      operationId: listSavedReports
+      parameters:
+        - $ref: '#/components/parameters/UserId'
+      responses:
+        '200':
+          description: 사용자가 저장한 발행 리포트 목록
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ReportCard'
+  /users/{userId}/saved-reports/{reportId}:
+    put:
+      tags: [Saved Reports]
+      summary: 리포트 저장
+      description: |
+        이미 저장된 리포트에도 204를 반환하는 멱등 연산입니다.
+        PUBLISHED가 아닌 리포트 또는 존재하지 않는 리포트는 저장할 수 없습니다.
+      operationId: saveReport
+      parameters:
+        - $ref: '#/components/parameters/UserId'
+        - $ref: '#/components/parameters/ReportId'
+      responses:
+        '204':
+          description: 저장 완료 또는 이미 저장됨
+        '404':
+          $ref: '#/components/responses/ReportNotFound'
+    delete:
+      tags: [Saved Reports]
+      summary: 저장 리포트 해제
+      description: 저장하지 않은 리포트에도 204를 반환하는 멱등 연산입니다.
+      operationId: unsaveReport
+      parameters:
+        - $ref: '#/components/parameters/UserId'
+        - $ref: '#/components/parameters/ReportId'
+      responses:
+        '204':
+          description: 저장 해제 완료 또는 이미 해제됨
+  /admin/candidates:
+    get:
+      tags: [Admin Candidates]
+      summary: 트렌드 후보 목록 조회
+      description: AI가 분석한 트렌드 후보 목록을 조회합니다.
+      operationId: listCandidates
+      parameters:
+        - name: status
+          in: query
+          description: 후보 검토 상태 필터
+          schema:
+            $ref: '#/components/schemas/CandidateStatus'
+      responses:
+        '200':
+          description: 후보 카드 목록
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/TrendCandidate'
+  /admin/candidates/{candidateId}/adopt:
+    post:
+      tags: [Admin Candidates]
+      summary: 후보 채택 및 초안 리포트 생성
+      description: |
+        PENDING 후보만 채택할 수 있습니다. 후보 상태를 ADOPTED로 바꾸고,
+        해당 후보와 연결된 DRAFT 리포트를 하나의 트랜잭션에서 생성합니다.
+      operationId: adoptCandidate
+      parameters:
+        - $ref: '#/components/parameters/CandidateId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CandidateReviewRequest'
+      responses:
+        '201':
+          description: 채택과 초안 리포트 생성 완료
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminReportDetail'
+        '404':
+          $ref: '#/components/responses/CandidateNotFound'
+        '409':
+          description: 이미 검토됐거나 리포트가 연결된 후보
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                code: CANDIDATE_ALREADY_REVIEWED
+                message: 이미 검토된 후보입니다.
+                fieldErrors: []
+  /admin/candidates/{candidateId}:
+    delete:
+      tags: [Admin Candidates]
+      summary: 후보 삭제
+      description: PENDING 후보만 실제로 삭제합니다. 채택된 후보는 연결된 리포트 관계 때문에 삭제할 수 없습니다.
+      operationId: deleteCandidate
+      parameters:
+        - $ref: '#/components/parameters/CandidateId'
+      responses:
+        '204':
+          description: 후보 삭제 완료
+        '404':
+          $ref: '#/components/responses/CandidateNotFound'
+        '409':
+          description: 이미 채택되어 삭제할 수 없는 후보
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                code: CANDIDATE_ALREADY_REVIEWED
+                message: 이미 채택된 후보는 삭제할 수 없습니다.
+                fieldErrors: []
+  /admin/reports:
+    get:
+      tags: [Admin Reports]
+      summary: 관리용 리포트 목록 조회
+      description: 삭제된 리포트는 반환하지 않습니다. keyword가 제공되면 제목에 해당 검색어가 포함된 리포트만 반환하며, status와 함께 전달하면 두 조건을 모두 적용합니다.
+      operationId: listAdminReports
+      parameters:
+        - name: status
+          in: query
+          description: DRAFT 또는 PUBLISHED 상태 필터
+          schema:
+            $ref: '#/components/schemas/ReportStatus'
+        - name: keyword
+          in: query
+          description: 리포트 제목 포함 검색어
+          schema:
+            type: string
+            minLength: 1
+      responses:
+        '200':
+          description: 관리용 리포트 목록
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AdminReportCard'
+  /admin/reports/{reportId}:
+    get:
+      tags: [Admin Reports]
+      summary: 리포트 편집용 상세 조회
+      operationId: getAdminReport
+      parameters:
+        - $ref: '#/components/parameters/ReportId'
+      responses:
+        '200':
+          description: 초안 또는 발행 리포트의 관리용 상세
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminReportDetail'
+        '404':
+          $ref: '#/components/responses/ReportNotFound'
+    patch:
+      tags: [Admin Reports]
+      summary: 리포트 편집 내용 저장
+      description: 편집 가능한 필드만 부분 수정합니다. 삭제된 리포트는 수정할 수 없습니다.
+      operationId: updateReport
+      parameters:
+        - $ref: '#/components/parameters/ReportId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReportUpdateRequest'
+      responses:
+        '200':
+          description: 수정된 리포트
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminReportDetail'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '404':
+          $ref: '#/components/responses/ReportNotFound'
+    delete:
+      tags: [Admin Reports]
+      summary: 리포트 삭제
+      description: 삭제된 리포트는 이후 목록과 상세 조회에 노출하지 않습니다.
+      operationId: deleteReport
+      parameters:
+        - $ref: '#/components/parameters/ReportId'
+      responses:
+        '204':
+          description: 삭제 처리 완료
+        '404':
+          $ref: '#/components/responses/ReportNotFound'
+  /admin/reports/{reportId}/publish:
+    post:
+      tags: [Admin Reports]
+      summary: 초안 리포트 발행
+      description: 필수 편집 값이 모두 유효한 DRAFT 리포트만 발행합니다. 발행 시 status는 PUBLISHED가 되고 publishedAt이 설정됩니다.
+      operationId: publishReport
+      parameters:
+        - $ref: '#/components/parameters/ReportId'
+      responses:
+        '200':
+          description: 발행된 리포트
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminReportDetail'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '404':
+          $ref: '#/components/responses/ReportNotFound'
+        '409':
+          description: 이미 발행됐거나 삭제된 리포트
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+components:
+  parameters:
+    CategoryIdFilter:
+      name: categoryId
+      in: query
+      description: 카테고리 ID 필터
+      schema:
+        type: integer
+        format: int64
+        minimum: 1
+    ReportId:
+      name: reportId
+      in: path
+      required: true
+      schema:
+        type: integer
+        format: int64
+        minimum: 1
+    CandidateId:
+      name: candidateId
+      in: path
+      required: true
+      schema:
+        type: integer
+        format: int64
+        minimum: 1
+    UserId:
+      name: userId
+      in: path
+      required: true
+      description: 로그인 성공 응답의 id를 사용하는 사용자 식별자
+      schema:
+        type: integer
+        format: int64
+        minimum: 1
+  responses:
+    ReportNotFound:
+      description: 리포트를 찾을 수 없음
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            code: REPORT_NOT_FOUND
+            message: 리포트를 찾을 수 없습니다.
+            fieldErrors: []
+    CandidateNotFound:
+      description: 후보를 찾을 수 없음
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            code: CANDIDATE_NOT_FOUND
+            message: 트렌드 후보를 찾을 수 없습니다.
+            fieldErrors: []
+    ValidationError:
+      description: 요청 값 검증 실패
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            code: VALIDATION_ERROR
+            message: 요청 값을 확인해 주세요.
+            fieldErrors:
+              - field: title
+                reason: 제목은 255자 이하여야 합니다.
+    LoginIdConflict:
+      description: 이미 사용 중인 로그인 아이디
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            code: LOGIN_ID_ALREADY_EXISTS
+            message: 이미 사용 중인 아이디입니다.
+            fieldErrors:
+              - field: loginId
+                reason: 이미 사용 중인 아이디입니다.
+    InvalidCredentials:
+      description: 로그인 아이디 또는 비밀번호 불일치
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            code: INVALID_CREDENTIALS
+            message: 아이디와 비밀번호를 확인해 주세요.
+            fieldErrors: []
+  schemas:
+    SignupRequest:
+      type: object
+      additionalProperties: false
+      required: [name, loginId, password]
+      properties:
+        name:
+          type: string
+          minLength: 1
+        loginId:
+          type: string
+          minLength: 1
+        password:
+          type: string
+          format: password
+          minLength: 1
+    LoginRequest:
+      type: object
+      additionalProperties: false
+      required: [loginId, password]
+      properties:
+        loginId:
+          type: string
+          minLength: 1
+        password:
+          type: string
+          format: password
+          minLength: 1
+    UserRole:
+      type: string
+      enum: [USER, ADMIN]
+    AuthenticatedUser:
+      type: object
+      additionalProperties: false
+      required: [id, name, loginId, role]
+      properties:
+        id:
+          type: integer
+          format: int64
+          example: 1
+        name:
+          type: string
+          example: 홍길동
+        loginId:
+          type: string
+          example: user01
+        role:
+          $ref: '#/components/schemas/UserRole'
+    Category:
+      type: object
+      additionalProperties: false
+      required: [id, name, displayOrder]
+      properties:
+        id:
+          type: integer
+          format: int64
+          example: 1
+        name:
+          type: string
+          maxLength: 50
+          example: 밈
+        displayOrder:
+          type: integer
+          example: 1
+    InterestLevel:
+      type: string
+      enum: [LOW, MEDIUM, HIGH]
+    CandidateStatus:
+      type: string
+      enum: [PENDING, ADOPTED]
+    ReportStatus:
+      type: string
+      enum: [DRAFT, PUBLISHED]
+    ReportCard:
+      type: object
+      required: [id, title, summary, category, interestLevel, publishedAt]
+      properties:
+        id:
+          type: integer
+          format: int64
+          example: 10
+        title:
+          type: string
+          maxLength: 255
+          example: 거제 야호? 갑자기 거제도?
+        summary:
+          type: string
+          maxLength: 500
+          example: 최근 아이돌그룸 “리센느"의 멤머 “원이"의 채널에서 같은 그룹의 멤버 “미나미"가 “거제 야호~”를 말한 것을 시작으로 유튜브, 인스타그램 등 SNS에서 확산된 유행어입니다.
+        imageUrl:
+          type: [string, 'null']
+          format: uri
+        category:
+          $ref: '#/components/schemas/Category'
+        interestLevel:
+          $ref: '#/components/schemas/InterestLevel'
+        publishedAt:
+          type: string
+          format: date-time
+    ReportDetail:
+      allOf:
+        - $ref: '#/components/schemas/ReportCard'
+        - type: object
+          required:
+            - description
+            - platforms
+            - keywords
+            - diffusionStartedOn
+            - diffusionEndedOn
+            - engagementEvidence
+            - platformSpreadEvidence
+          properties:
+            description:
+              type: string
+              example: 숏츠 영상이 플랫폼별로 반복 노출되며 밈과 챌린지로 확산되고 있습니다.
+            platforms:
+              type: array
+              minItems: 1
+              items:
+                type: string
+                maxLength: 50
+              example: [TikTok, YouTube, Instagram]
+            keywords:
+              type: array
+              minItems: 1
+              items:
+                type: string
+                maxLength: 100
+              example: [거제 야호, 리믹스, 숏폼]
+            diffusionStartedOn:
+              type: [string, 'null']
+              format: date
+            diffusionEndedOn:
+              type: [string, 'null']
+              format: date
+            engagementEvidence:
+              type: [string, 'null']
+            platformSpreadEvidence:
+              type: [string, 'null']
+    TrendCandidate:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - category
+        - title
+        - sourceLinks
+        - interestLevel
+        - status
+      properties:
+        id:
+          type: integer
+          format: int64
+          example: 21
+        category:
+          $ref: '#/components/schemas/Category'
+        title:
+          type: string
+          maxLength: 255
+          example: 거제 야호? 갑자기 거제도?
+        aiSummary:
+          type: [string, 'null']
+        sourceLinks:
+          type: array
+          minItems: 1
+          items:
+            type: string
+            format: uri
+        interestLevel:
+          $ref: '#/components/schemas/InterestLevel'
+        status:
+          $ref: '#/components/schemas/CandidateStatus'
+        diffusionStartedOn:
+          type: [string, 'null']
+          format: date
+        repeatMentionCount:
+          type: [integer, 'null']
+          minimum: 0
+        recentContentGrowthRate:
+          type: [number, 'null']
+          multipleOf: 0.01
+        engagementSummary:
+          type: [string, 'null']
+        platformSpreadSummary:
+          type: [string, 'null']
+    CandidateReviewRequest:
+      type: object
+      additionalProperties: false
+      required: [reviewerId]
+      properties:
+        reviewerId:
+          type: integer
+          format: int64
+          minimum: 1
+          description: 후보 검토를 수행한 사용자 ID
+    AdminReportDetail:
+      allOf:
+        - $ref: '#/components/schemas/ReportDetail'
+        - type: object
+          required: [status]
+          properties:
+            status:
+              $ref: '#/components/schemas/ReportStatus'
+    AdminReportCard:
+      type: object
+      additionalProperties: false
+      required: [id, title, category, status]
+      properties:
+        id:
+          type: integer
+          format: int64
+        title:
+          type: string
+          maxLength: 255
+        category:
+          $ref: '#/components/schemas/Category'
+        status:
+          $ref: '#/components/schemas/ReportStatus'
+    ReportUpdateRequest:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 255
+        categoryId:
+          type: integer
+          format: int64
+          minimum: 1
+        summary:
+          type: string
+          minLength: 1
+          maxLength: 500
+        imageUrl:
+          type: [string, 'null']
+          format: uri
+          maxLength: 2048
+        description:
+          type: string
+          minLength: 1
+        platforms:
+          type: array
+          minItems: 1
+          items:
+            type: string
+            minLength: 1
+            maxLength: 50
+        keywords:
+          type: array
+          minItems: 1
+          items:
+            type: string
+            minLength: 1
+            maxLength: 100
+        diffusionStartedOn:
+          type: [string, 'null']
+          format: date
+        diffusionEndedOn:
+          type: [string, 'null']
+          format: date
+        interestLevel:
+          $ref: '#/components/schemas/InterestLevel'
+        engagementEvidence:
+          type: [string, 'null']
+        platformSpreadEvidence:
+          type: [string, 'null']
+    FieldError:
+      type: object
+      additionalProperties: false
+      required: [field, reason]
+      properties:
+        field:
+          type: string
+        reason:
+          type: string
+    ErrorResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message, fieldErrors]
+      properties:
+        code:
+          type: string
+          example: VALIDATION_ERROR
+        message:
+          type: string
+          example: 요청 값을 확인해 주세요.
+        fieldErrors:
+          type: array
+          items:
+            $ref: '#/components/schemas/FieldError'
