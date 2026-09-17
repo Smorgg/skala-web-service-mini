@@ -1,7 +1,3 @@
-Project trend_report_service {
-  database_type: 'PostgreSQL'
-  Note: 'Public users may read only reports whose status is PUBLISHED.'
-}
 Enum member_role {
   USER
   ADMIN
@@ -20,9 +16,15 @@ Enum interest_level {
   MEDIUM
   HIGH
 }
+Enum platform_type {
+  YOUTUBE
+  INSTAGRAM
+  TIKTOK
+}
 Table users {
   id bigint [pk, increment]
   email varchar(255) [not null, unique]
+  name varchar(255) [not null]
   password_hash varchar(255) [not null]
   role member_role [not null, default: 'USER']
   created_at timestamp [not null]
@@ -38,7 +40,6 @@ Table trend_candidates {
   category_id bigint [not null]
   title varchar(255) [not null]
   ai_summary text
-  source_links text[] [not null, note: 'Source URLs used during review.']
   interest_level interest_level [not null]
   status candidate_status [not null, default: 'PENDING']
   diffusion_started_on date
@@ -52,6 +53,19 @@ Table trend_candidates {
   updated_at timestamp [not null]
   Note: 'Adopt a candidate and create its report in one transaction.'
 }
+Table trend_evidences {
+  id bigint [pk, increment]
+  candidate_id bigint [not null]
+  platform platform_type [not null]
+  source_url varchar(2048) [not null]
+  observed_at timestamp [not null, note: 'Time when the source metrics were collected.']
+  published_at timestamp
+  view_count bigint
+  like_count bigint
+  comment_count bigint
+  created_at timestamp [not null]
+  Note: 'Periodic source metrics for one candidate. Metrics unavailable from a platform remain NULL.'
+}
 Table reports {
   id bigint [pk, increment]
   candidate_id bigint [not null, unique, note: 'Must reference an ADOPTED candidate.']
@@ -61,7 +75,7 @@ Table reports {
   summary varchar(500) [not null]
   image_url varchar(2048)
   description text [not null, note: 'Includes final source links.']
-  platforms varchar(50)[] [not null, note: 'Use a PostgreSQL GIN index for platform filtering.']
+  platforms platform_type[] [not null, note: 'Use a PostgreSQL GIN index for platform filtering.']
   keywords varchar(100)[] [not null, note: 'Use a PostgreSQL GIN index for keyword filtering.']
   diffusion_started_on date
   diffusion_ended_on date
@@ -84,6 +98,7 @@ Table saved_reports {
 }
 Ref: trend_candidates.category_id > categories.id
 Ref: trend_candidates.reviewed_by >? users.id
+Ref: trend_evidences.candidate_id > trend_candidates.id
 Ref: reports.candidate_id > trend_candidates.id
 Ref: reports.category_id > categories.id
 Ref: reports.author_id > users.id
